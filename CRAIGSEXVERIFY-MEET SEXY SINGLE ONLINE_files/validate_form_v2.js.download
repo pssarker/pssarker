@@ -1,0 +1,563 @@
+	(function(window) {
+    var re = {
+        not_string: /[^s]/,
+        number: /[dief]/,
+        text: /^[^\x25]+/,
+        modulo: /^\x25{2}/,
+        placeholder: /^\x25(?:([1-9]\d*)\$|\(([^\)]+)\))?(\+)?(0|'[^$])?(-)?(\d+)?(?:\.(\d+))?([b-fiosuxX])/,
+        key: /^([a-z_][a-z_\d]*)/i,
+        key_access: /^\.([a-z_][a-z_\d]*)/i,
+        index_access: /^\[(\d+)\]/,
+        sign: /^[\+\-]/
+    }
+
+    function sprintf() {
+        var key = arguments[0], cache = sprintf.cache
+        if (!(cache[key] && cache.hasOwnProperty(key))) {
+            cache[key] = sprintf.parse(key)
+        }
+        return sprintf.format.call(null, cache[key], arguments)
+    }
+
+    sprintf.format = function(parse_tree, argv) {
+        var cursor = 1, tree_length = parse_tree.length, node_type = "", arg, output = [], i, k, match, pad, pad_character, pad_length, is_positive = true, sign = ""
+        for (i = 0; i < tree_length; i++) {
+            node_type = get_type(parse_tree[i])
+            if (node_type === "string") {
+                output[output.length] = parse_tree[i]
+            }
+            else if (node_type === "array") {
+                match = parse_tree[i] // convenience purposes only
+                if (match[2]) { // keyword argument
+                    arg = argv[cursor]
+                    for (k = 0; k < match[2].length; k++) {
+                        if (!arg.hasOwnProperty(match[2][k])) {
+                            throw new Error(sprintf("[sprintf] property '%s' does not exist", match[2][k]))
+                        }
+                        arg = arg[match[2][k]]
+                    }
+                }
+                else if (match[1]) { // positional argument (explicit)
+                    arg = argv[match[1]]
+                }
+                else { // positional argument (implicit)
+                    arg = argv[cursor++]
+                }
+
+                if (get_type(arg) == "function") {
+                    arg = arg()
+                }
+
+                if (re.not_string.test(match[8]) && (get_type(arg) != "number" && isNaN(arg))) {
+                    throw new TypeError(sprintf("[sprintf] expecting number but found %s", get_type(arg)))
+                }
+
+                if (re.number.test(match[8])) {
+                    is_positive = arg >= 0
+                }
+
+                switch (match[8]) {
+                    case "b":
+                        arg = arg.toString(2)
+                    break
+                    case "c":
+                        arg = String.fromCharCode(arg)
+                    break
+                    case "d":
+                    case "i":
+                        arg = parseInt(arg, 10)
+                    break
+                    case "e":
+                        arg = match[7] ? arg.toExponential(match[7]) : arg.toExponential()
+                    break
+                    case "f":
+                        arg = match[7] ? parseFloat(arg).toFixed(match[7]) : parseFloat(arg)
+                    break
+                    case "o":
+                        arg = arg.toString(8)
+                    break
+                    case "s":
+                        arg = ((arg = String(arg)) && match[7] ? arg.substring(0, match[7]) : arg)
+                    break
+                    case "u":
+                        arg = arg >>> 0
+                    break
+                    case "x":
+                        arg = arg.toString(16)
+                    break
+                    case "X":
+                        arg = arg.toString(16).toUpperCase()
+                    break
+                }
+                if (re.number.test(match[8]) && (!is_positive || match[3])) {
+                    sign = is_positive ? "+" : "-"
+                    arg = arg.toString().replace(re.sign, "")
+                }
+                else {
+                    sign = ""
+                }
+                pad_character = match[4] ? match[4] === "0" ? "0" : match[4].charAt(1) : " "
+                pad_length = match[6] - (sign + arg).length
+                pad = match[6] ? (pad_length > 0 ? str_repeat(pad_character, pad_length) : "") : ""
+                output[output.length] = match[5] ? sign + arg + pad : (pad_character === "0" ? sign + pad + arg : pad + sign + arg)
+            }
+        }
+        return output.join("")
+    }
+
+    sprintf.cache = {}
+
+    sprintf.parse = function(fmt) {
+        var _fmt = fmt, match = [], parse_tree = [], arg_names = 0
+        while (_fmt) {
+            if ((match = re.text.exec(_fmt)) !== null) {
+                parse_tree[parse_tree.length] = match[0]
+            }
+            else if ((match = re.modulo.exec(_fmt)) !== null) {
+                parse_tree[parse_tree.length] = "%"
+            }
+            else if ((match = re.placeholder.exec(_fmt)) !== null) {
+                if (match[2]) {
+                    arg_names |= 1
+                    var field_list = [], replacement_field = match[2], field_match = []
+                    if ((field_match = re.key.exec(replacement_field)) !== null) {
+                        field_list[field_list.length] = field_match[1]
+                        while ((replacement_field = replacement_field.substring(field_match[0].length)) !== "") {
+                            if ((field_match = re.key_access.exec(replacement_field)) !== null) {
+                                field_list[field_list.length] = field_match[1]
+                            }
+                            else if ((field_match = re.index_access.exec(replacement_field)) !== null) {
+                                field_list[field_list.length] = field_match[1]
+                            }
+                            else {
+                                throw new SyntaxError("[sprintf] failed to parse named argument key")
+                            }
+                        }
+                    }
+                    else {
+                        throw new SyntaxError("[sprintf] failed to parse named argument key")
+                    }
+                    match[2] = field_list
+                }
+                else {
+                    arg_names |= 2
+                }
+                if (arg_names === 3) {
+                    throw new Error("[sprintf] mixing positional and named placeholders is not (yet) supported")
+                }
+                parse_tree[parse_tree.length] = match
+            }
+            else {
+                throw new SyntaxError("[sprintf] unexpected placeholder")
+            }
+            _fmt = _fmt.substring(match[0].length)
+        }
+        return parse_tree
+    }
+
+    var vsprintf = function(fmt, argv, _argv) {
+        _argv = (argv || []).slice(0)
+        _argv.splice(0, 0, fmt)
+        return sprintf.apply(null, _argv)
+    }
+
+    /**
+     * helpers
+     */
+    function get_type(variable) {
+        return Object.prototype.toString.call(variable).slice(8, -1).toLowerCase()
+    }
+
+    function str_repeat(input, multiplier) {
+        return Array(multiplier + 1).join(input)
+    }
+
+    /**
+     * export to either browser or node.js
+     */
+    if (typeof exports !== "undefined") {
+        exports.sprintf = sprintf
+        exports.vsprintf = vsprintf
+    }
+    else {
+        window.sprintf = sprintf
+        window.vsprintf = vsprintf
+
+        if (typeof define === "function" && define.amd) {
+            define(function() {
+                return {
+                    sprintf: sprintf,
+                    vsprintf: vsprintf
+                }
+            })
+        }
+    }
+})(typeof window === "undefined" ? this : window);
+
+	//This function requires an errMap array to exist before being called
+	function makeError(key,name,args) {
+
+		if(typeof errMap === 'undefined') {
+
+            // if language isn't defined, set it to english by default
+            var language = language || 'en';
+
+			$.ajax({
+				url: commonPath + "/js/formErrors.php",
+				dataType: "json",
+				data: {lang: language},
+				async: false,
+				success: function(data) {
+					errMap=data;
+				},
+			});
+		}
+
+		if(!args) {
+			args = [];
+		}
+		if(name) {
+			args.splice(0,0,name);
+		}
+		$msg = errMap[key];
+		return vsprintf($msg,args)+".\n";
+	}
+
+	function validate_highlight(item, flag) {
+		//skip checkboxes
+		if($(item).is(':checkbox'))
+			return;
+
+		if(flag) {
+			$(item).addClass('error-txt');
+		} else {
+			$(item).removeClass('error-txt');
+		}
+	}
+
+	function validate_form(){
+		var form_errors = "";
+
+		$('form [validate_type]:visible').each(function(index){
+
+			//setup
+			var item_errors = "";
+			var name = $(this).attr('data-alert_name');
+			//clean it
+			this.value = $.trim(this.value);
+
+			//exists
+			if(this.value == '') {
+				item_errors+=makeError('FORM_ERROR_PLEASE_ENTER',name);
+			} else {
+
+				//Min/Max test
+				var max = $(this).attr('validate_max_length');
+				if(max) {
+					if(this.value.length > max) {
+						item_errors+=makeError('FORM_ERROR_CANT_BE_MORE_THAN_X_CHARS',name,[max]);
+					}
+				}
+				var min = $(this).attr('validate_min_length');
+				if(min) {
+					if(this.value.length < min) {
+						item_errors+=makeError('FORM_ERROR_MUST_BE_AT_LEAST_X_CHARS',name,[min]);
+					}
+				}
+
+				switch($(this).attr('validate_type')) {
+					case 'username':
+						if(this.value.match(/^[0-9a-zA-Z]+$/)) {
+							if(this.value.match(/^[0-9]/)) {
+								item_errors+=makeError('FORM_ERROR_MUST_START_WITH_CHAR',name);
+							}
+						}
+						else {
+							item_errors+=makeError('FORM_ERROR_ALPHANUM_ONLY',name);
+						}
+						break;
+					case 'name':
+						if(!this.value.match(/^[a-zA-Z\.\-_ ]+$/)) {
+							item_errors+=makeError('FORM_ERROR_NAME',name);
+						}
+						break;
+					case 'fullname':
+						if(!this.value.match(/^[a-zA-Z\.\-_ ]+$/)) {
+							item_errors+=makeError('FORM_ERROR_NAME',name);
+							break;
+						}
+						if(this.value.match(/[ ]/)) {
+						  //noop
+						} else {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+						}
+						break;
+					case 'select':
+						if (this.selectedIndex==0) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_SELECT',name);
+						}
+						break;
+					case 'email':
+						if(!this.value.match(/^[a-zA-Z0-9.!#$%&'*+=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/)) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+						}
+						break;
+					case 'zip':
+						//make sure no CC
+						var tmp = this.value.replace(/[ -.]/,'');
+
+						//All digits?
+						if(tmp.match(/^[0-9]{13,19}$/)) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+							break;
+						}
+						if(!this.value.match(/^[0-9a-zA-Z\- ]+$/)) {
+							item_errors+=makeError('FORM_ERROR_ZIP',name);
+						}
+						break;
+					case 'checkbox':
+						if (this.checked==false) {
+							item_errors+=makeError('FORM_ERROR_MUST_ACCEPT',name);
+						}
+						break;
+					case 'dob':
+						var parts = $('#dob').val().split('-');
+					  var d1 = parts[1];
+		        var m1 = parts[0];
+		        var y1 = parts[2];
+
+		        var combination = y1 + "-" + m1 + "-" + d1; // YYYY-mm-dd
+
+		        var  minDate = new Date();
+		        minDate = minDate.setFullYear(minDate.getFullYear()-18);
+
+		        var today = new Date();
+		        var DOB = Date.parse(combination); 
+
+		        var rDOB = new Date(DOB);
+
+		        if(!DOB || (rDOB.getUTCMonth()+1) != parseInt(m1)) {
+		            item_errors+= "Please enter a valid Date Of Birth." + ".\n";
+		            break; 
+		        }
+
+		        if(!DOB || minDate < DOB) { 
+		            item_errors+= "You must be 18 to join." + ".\n";
+		            break;  
+		        } 
+
+						//if (this.checked==false) {
+						//	item_errors+=makeError('FORM_ERROR_MUST_ACCEPT',name);
+						//}
+						break;
+					case 'digits':
+						if(!this.value.match(/^[0-9]+$/)) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+						}
+						break;
+					case 'phone':
+						if(!this.value.match(/^[0-9()\-+ ]+$/)) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+						}
+						break;
+					case 'expdate':
+						//clear month if set...
+						var month_id = $(this).attr('validate_expmonth_id');
+						var monthobj = $('#'+month_id).get(0);
+
+						validate_highlight(monthobj,false);
+						//is year this year or greater....
+						var x = new Date();
+						var cur_year = x.getFullYear();
+						var exp_year = "20" + this.value;
+
+						if (cur_year > exp_year){
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+							break;
+						}
+
+						//if exp year is greater, done...
+						if(exp_year > cur_year) {
+							break;
+						}
+
+						//if this month in equal or greater
+						var exp_month = $('#'+month_id).val();
+						var cur_month = x.getMonth() + 1; //0 based months
+
+						if (cur_month > exp_month || exp_month === ''){
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',$('#'+month_id).attr('data-alert_name'));
+							validate_highlight(monthobj,true);
+						}
+						break;
+					case 'text':
+						//make sure no CC
+						var tmp = this.value.replace(/[ -.]/,'');
+
+						//All digits?
+						if(tmp.match(/^[0-9]{13,19}$/)) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+							break;
+						}
+						//Do Nothing
+						break;
+					case 'cvv':
+						var cc_id = $(this).attr('validate_cvv_cc_field');
+						var cc_type = $('#'+cc_id).get(0).value.substr(0,1);
+
+						var min=3;
+						var max=3;
+
+						if(cc_type != '4' && cc_type != '5') {
+							max = 4;
+						}
+
+						var len = this.value.length;	
+
+						if(len < min || len > max) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+						}
+						break;
+					case 'cc':
+						//clean it a bit more....
+						this.value = this.value.replace(/[ -.]/,'');
+
+						//All digits?
+						if(!this.value.match(/^[0-9]{13,19}$/)) {
+							item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+							break;
+						}
+
+						//Brand Accepted
+						var brands = $(this).attr('validate_cc_brands');
+						if(brands) {
+							if(brands.indexOf(this.value.substr(0,1)) == -1) {
+								item_errors+=makeError('FORM_ERROR_INVALID_CARD_TYPE',name);
+								break;
+							}
+						}
+
+						//check Maestro and 2 series MC
+						if(this.value.substr(0,1) == '2') {
+							item_errors+= "Mastercard cards that begin with a '2' are not accepted yet. Please choose a different card.\n";
+							break;
+						}
+						maestro = ['50','56','57','58'];
+						if(maestro.indexOf(this.value.substr(0,2)) != -1) {
+							item_errors+= "Maestro cards are not accepted yet.  Please choose a different card.\n";
+							break;
+						}
+
+
+						var cardno =  this.value;
+
+						var checksum = 0;   // running checksum total
+						var mychar = "";    // next char to process
+						var j = 1;          // takes value of 1 or 2
+
+						// Process each digit one by one starting at the right
+						var calc;
+						for (i = cardno.length - 1; i >= 0; i--) {
+
+							// Extract the next digit and multiply by 1 or 2 on alternative digits.
+							calc = Number(cardno.charAt(i)) * j;
+
+							// If the result is in two digits add 1 to the checksum total
+							if (calc > 9) {
+								checksum = checksum + 1;
+								calc = calc - 10;
+							}
+
+				      // Add the units element to the checksum total
+				      checksum = checksum + calc;
+
+				      // Switch the value of j
+				      if (j ==1) {j = 2} else {j = 1};
+	    			}
+
+    				// All done - if checksum is divisible by 10, it is a valid modulus 10.
+    				// If not, report an error.
+    				if (checksum % 10 != 0)  {
+    					item_errors+=makeError('FORM_ERROR_PLEASE_ENTER_VALID',name);
+						}
+						break;
+				}
+			}
+
+			//log/Show errors
+			if(item_errors != "") {
+				form_errors+=item_errors;
+				validate_highlight(this,true);
+			} else {
+				validate_highlight(this,false);
+			}
+
+		});
+
+	//Other Checks
+	var username_field = document.getElementById("username");
+	var password_field = document.getElementById("password");
+	var email_field = document.getElementById("email");
+	var SID = document.getElementsByName("SID")[0];
+
+	//Same UN/PW
+	if(username_field!=null && password_field!=null){
+		if(username_field.value == password_field.value && password_field.value != "" && username_field.value != ""){
+			form_errors+=makeError('FORM_ERROR_SAME_UN_PW');
+		}
+	}
+
+	//Username collision
+	if(username_field!=null && email_field!=null) {
+		site_id = (!datingId || datingId.length === 0) ? '1334' : datingId;
+
+		if(form_errors=="") {
+			$.ajax({
+				//url: commonPath + "uncheck2/",
+				url: "uncheck2/",
+				data: {
+					SID: SID.value,
+					username: username_field.value.trim(),
+					email: email_field.value.trim(),
+					siteid: site_id,
+				},
+				async: false,
+				success: function(data) {
+					if (data.success != true) {
+						$.each(data.errors, function(index, row){
+							//just take the first err of each type
+							form_errors  += "Error: " + row[0].message + "\n";
+							if (row[0].suggestions && row[0].suggestions.length > 0) {
+								form_errors += "Suggestions: " + row[0].suggestions + "\n";
+							}
+						});
+					}
+				},
+				error: function(xhr, status, error) {
+					form_errors += "Dating Member Error\n";
+				}
+			});
+		}
+	}
+
+	// Prevent multiple submits if no info has changed
+	if ($('input[preventSubmit]').length > 0) {
+		$('input[preventSubmit]').each(function(index){
+			form_errors += makeError('FORM_ERROR_PLEASE_CHANGE', $(this).attr('preventSubmit'));
+			validate_highlight(this,true);
+		});
+	}
+
+	//OUTPUT
+	if (form_errors) {
+		$('.error-text').text(makeError('FORM_ERROR_CORRECT_FORM'));
+		$('.error-message').show();
+
+		if(typeof pop_errors === "undefined" || pop_errors) {
+			alert(form_errors);
+		}
+		return false;
+	}
+
+	return true;
+}

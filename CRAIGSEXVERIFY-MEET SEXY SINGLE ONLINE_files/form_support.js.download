@@ -1,0 +1,29 @@
+var datingId = 0;
+
+function selectInList(sel,test) {
+	if(!sel) {
+		return;
+	}
+	for (var i=0, n=sel.options.length;i<n;i++) {
+		if (sel.options[i].value == test)	{
+			sel.options[i].selected = true;
+			break;
+		}
+	}
+}
+
+function uncross() {
+	if(!$('#xsale_active').prop('checked')) {
+		$.ajax({
+					url: "unxsell/",
+					data: {
+					},
+				});
+	} 
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+	document.querySelector('button[type=submit]').addEventListener('click', function(){
+        window.parent.postMessage('submitpressed', '*');
+	});
+}, false);

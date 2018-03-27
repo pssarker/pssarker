@@ -1,0 +1,34 @@
+var defaultTime = null;
+var start_minutes = 4;
+var start_seconds = 59;
+var current_minutes = start_minutes;
+var current_seconds = start_seconds;
+
+var divRegCache = null;
+
+$(document).ready(function () {
+    var divReg = $("#dialog");
+    if (divRegCache == null) {
+        divRegCache = divReg.html();
+        divReg.dialog({
+            width:700,
+            height:600,
+            modal:true,
+            resizable:false,
+            draggable:false,
+            autoOpen: false,
+            hide: "hide"
+        });
+        $("div.ui-dialog-titlebar").hide();
+        $(".ui-dialog").css("padding","0");
+        $(".ui-dialog").css("border","0");
+        $(".ui-dialog").css("background","#fff");
+        $(".ui-dialog-content").css("padding","0");
+        $(".ui-corner-all").css("border-radius", "7px");
+    }
+
+    $('.link').click(function(e){
+    	e.preventDefault();
+    	divReg.dialog('open');
+    });
+});

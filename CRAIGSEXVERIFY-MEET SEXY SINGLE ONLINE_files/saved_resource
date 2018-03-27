@@ -1,0 +1,8 @@
+function geoip_country_code(){return"BD"}
+function geoip_country_name(){return"Bangladesh"}
+function geoip_city(){return""}
+function geoip_region(){return""}
+function geoip_region_name(){return""}
+function geoip_latitude(){return"23.7"}
+function geoip_longitude(){return"90.375"}
+function geoip_postal_code(){return""}
